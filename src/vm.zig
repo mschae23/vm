@@ -64,9 +64,12 @@ pub const VirtualMachine = struct {
                     break;
                 },
 
-                .load_nil => {
-                    print("Encountered illegal instruction (LOAD NIL) at {}\n", .{self.ip});
-                    break;
+                .dbg => {
+                    const register = self.nextByte();
+                    self.ip += 2;
+
+                    const value = self.registers[register];
+                    print("Register ${x} as int: {}, float: {d:.16}, bool: {}\n", .{register, @as(i64, @bitCast(value)), @as(f64, @bitCast(value)), 0 != value});
                 },
                 .load_int => {
                     const register = self.nextByte();

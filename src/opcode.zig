@@ -3,7 +3,8 @@ pub const Opcode = enum(u8) {
     halt = 1, // Halt
     igl = 2,  // Illegal
 
-    load_nil = 3,   // Load nil
+    dbg = 3, // Print value of register using debug logging
+
     load_int = 4,   // Load int
     load_true = 5,  // Load true
     load_false = 6, // Load false
