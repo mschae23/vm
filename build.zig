@@ -13,6 +13,12 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(exe);
 
+    const zigargs_dep = b.dependency("zigargs", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    exe.root_module.addImport("zigargs", zigargs_dep.module("args"));
+
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
 
