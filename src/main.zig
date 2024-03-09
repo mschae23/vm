@@ -50,7 +50,8 @@ pub fn main() !u8 {
     defer file.close();
     const reader = file.reader();
 
-    const assembly = try assembler.assemble(allocator, reader);
+    var a = try assembler.Assembler.init(allocator, reader);
+    const assembly = try a.assemble();
     defer allocator.free(assembly.instructions);
     defer allocator.free(assembly.constants);
 

@@ -359,6 +359,6 @@ pub const VirtualMachine = struct {
     }
 
     fn print(comptime fmt: []const u8, args: anytype) void {
-        return std.debug.print("[debug | vm ] " ++ fmt, args);
+        return std.debug.print("[debug | vm] " ++ fmt, args);
     }
 };
