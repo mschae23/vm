@@ -73,6 +73,7 @@ pub const VirtualMachine = struct {
                 },
                 .load_int => {
                     const register = self.nextByte();
+                    print("Load int at register {}\n", .{register});
                     self.registers[register] = @as(u64, self.next2BytesLittle());
                 },
                 .load_true => {
@@ -216,28 +217,28 @@ pub const VirtualMachine = struct {
                     const target = self.next2BytesLittle();
                     self.ip = target * 4;
                 },
-                .jmpf => {
+                .jro => {
                     const offset = self.next2BytesSignedLittle();
                     self.ip = @as(usize, @intCast(@as(isize, @intCast(self.ip - 3)) + (offset * 4)));
                 },
-                .jmpb => {
-                    const offset = self.next2BytesSignedLittle();
-                    self.ip = @as(usize, @intCast(@as(isize, @intCast(self.ip - 3)) - (offset * 4)));
+                .jmpdy => {
+                    const offset: isize = @intCast(@as(i64, @bitCast(self.registers[self.nextByte()])));
+                    self.ip = @as(usize, @intCast(@as(isize, @intCast(self.ip - 3)) + (offset * 4)));
                 },
                 .jez => {
                     const register = self.nextByte();
-                    const offset = self.next2BytesSignedLittle();
+                    const target = self.next2BytesLittle();
 
                     if (0 == self.registers[register]) {
-                        self.ip = @as(usize, @intCast(@as(isize, @intCast(self.ip - 4)) + (offset * 4)));
+                        self.ip = target * 4;
                     }
                 },
                 .jnz => {
                     const register = self.nextByte();
-                    const offset = self.next2BytesSignedLittle();
+                    const target = self.next2BytesLittle();
 
                     if (0 != self.registers[register]) {
-                        self.ip = @as(usize, @intCast(@as(isize, @intCast(self.ip - 4)) + (offset * 4)));
+                        self.ip = target * 4;
                     }
                 },
 

@@ -32,11 +32,11 @@ pub const Opcode = enum(u8) {
     addb = 26, // Add a bool register to an i64 register
     negb = 27, // Negate a bool register
 
-    jmp = 28,  // Jump to instruction (set IP)
-    jmpf = 29, // Jump forwards (increment IP)
-    jmpb = 30, // Jump backwards (decrement IP)
-    jez = 31,  // Jump if equal zero (jump if bool register == `false`)
-    jnz = 32,  // Jump if not equal zero (jump if bool register == `true`)
+    jmp = 28,   // Jump to instruction (set IP)
+    jro = 29,   // Jump forwards (increment IP)
+    jmpdy = 30, // Jump dynamic (increment IP)
+    jez = 31,   // Jump if equal zero (jump if bool register == `false`)
+    jnz = 32,   // Jump if not equal zero (jump if bool register == `true`)
 
     eqi = 33,  // Test for i64 equality
     neqi = 34, // Test for i64 inequality

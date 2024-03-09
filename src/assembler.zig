@@ -47,8 +47,8 @@ pub const OPCODE_TABLE: []const OpcodeItem = &.{
     OpcodeItem { .name = "negb", .opcode = Opcode.negb, },
 
     OpcodeItem { .name = "jmp", .opcode = Opcode.jmp, },
-    OpcodeItem { .name = "jmpf", .opcode = Opcode.jmpf, },
-    OpcodeItem { .name = "jmpb", .opcode = Opcode.jmpb, },
+    OpcodeItem { .name = "jro", .opcode = Opcode.jro, },
+    OpcodeItem { .name = "jmpdy", .opcode = Opcode.jmpdy, },
     OpcodeItem { .name = "jez", .opcode = Opcode.jez, },
     OpcodeItem { .name = "jnz", .opcode = Opcode.jnz, },
 
@@ -76,6 +76,7 @@ pub const Assembler = struct {
 
     instructions: std.ArrayListUnmanaged(u8),
     constants: std.ArrayListUnmanaged(vm.Value),
+    labels: std.StringHashMap(u16),
 
     /// Input has to be ASCII text.
     pub fn init(allocator: std.mem.Allocator, reader: std.fs.File.Reader) std.mem.Allocator.Error!Assembler {
@@ -84,9 +85,21 @@ pub const Assembler = struct {
             .reader = reader,
             .instructions = try std.ArrayListUnmanaged(u8).initCapacity(allocator, 0),
             .constants = try std.ArrayListUnmanaged(vm.Value).initCapacity(allocator, 0),
+            .labels = std.StringHashMap(u16).init(allocator),
         };
     }
 
+    pub fn deinit(self: *Assembler) void {
+        var keys = self.labels.keyIterator();
+
+        while (keys.next()) |key| {
+            self.allocator.free(@as([:0]const u8, @ptrCast(key.*)));
+        }
+
+        self.labels.deinit();
+    }
+
+    /// Caller owns returned memory.
     pub fn assemble(self: *Assembler) !Assembly {
         var buf: [256]u8 = .{undefined} ** 256;
         var fixedBufferStream = std.io.fixedBufferStream(&buf);
@@ -101,98 +114,113 @@ pub const Assembler = struct {
                 else => |e| return e,
             };
             const line = std.mem.trim(u8, fixedBufferStream.getWritten(), &std.ascii.whitespace);
-
-            if (std.mem.startsWith(u8, line, "#")) {
-                continue;
-            }
-
-            const line_lowered = try std.ascii.allocLowerString(self.allocator, line);
-            defer self.allocator.free(line_lowered);
-
-            var opcode: ?Opcode = null;
-            var rest = line;
-
-            for (OPCODE_TABLE) |item| {
-                if (std.mem.startsWith(u8, line_lowered, item.name)) {
-                    opcode = item.opcode;
-                    rest = rest[item.name.len..];
-                    break;
-                }
-            }
-
-            var fixedBufferStream2 = std.io.fixedBufferStream(rest);
-            const line_reader = fixedBufferStream2.reader().any();
-
-            if (opcode) |o| {
-                switch (o) {
-                    .nop => try self.addInstruction(o, 0, 0, 0),
-                    .halt => try self.addInstruction(o, 0, 0, 0),
-                    .igl => {
-                        std.debug.print("Illegal instruction `IGL` must not be used.\n", .{});
-                        return error.Illegal;
-                    },
-
-                    .dbg => try self.readDbg(line_reader),
-                    .load_int => try self.readLoadInt(line_reader),
-                    .load_true => try self.readOnlyRegister1(line_reader, o),
-                    .load_false => try self.readOnlyRegister1(line_reader, o),
-                    .load_const => {
-                        std.debug.print("Instruction `LOAD CONST` is not yet implemented.\n", .{});
-                        return error.Illegal;
-                    },
-
-                    .mov => try self.readOnlyRegister2(line_reader, o),
-                    .convitof => try self.readOnlyRegister2(line_reader, o),
-                    .convitob => try self.readOnlyRegister2(line_reader, o),
-                    .convftoi => try self.readOnlyRegister2(line_reader, o),
-                    .convbtoi => try self.readOnlyRegister2(line_reader, o),
-                    .clear => try self.readOnlyRegister1(line_reader, o),
-
-                    .addi => try self.readOnlyRegister3(line_reader, o),
-                    .subi => try self.readOnlyRegister3(line_reader, o),
-                    .muli => try self.readOnlyRegister3(line_reader, o),
-                    .divi => try self.readOnlyRegister3(line_reader, o),
-                    .modi => try self.readOnlyRegister3(line_reader, o),
-                    .negi => try self.readOnlyRegister2(line_reader, o),
-
-                    .addf => try self.readOnlyRegister3(line_reader, o),
-                    .subf => try self.readOnlyRegister3(line_reader, o),
-                    .mulf => try self.readOnlyRegister3(line_reader, o),
-                    .divf => try self.readOnlyRegister3(line_reader, o),
-                    .modf => try self.readOnlyRegister3(line_reader, o),
-                    .negf => try self.readOnlyRegister2(line_reader, o),
-
-                    .addb => try self.readOnlyRegister3(line_reader, o),
-                    .negb => try self.readOnlyRegister2(line_reader, o),
-
-                    .jmp => {},
-                    .jmpf => {},
-                    .jmpb => {},
-                    .jez => {},
-                    .jnz => {},
-
-                    .eqi =>  try self.readOnlyRegister3(line_reader, o),
-                    .neqi => try self.readOnlyRegister3(line_reader, o),
-                    .gti =>  try self.readOnlyRegister3(line_reader, o),
-                    .lti =>  try self.readOnlyRegister3(line_reader, o),
-                    .gtqi => try self.readOnlyRegister3(line_reader, o),
-                    .ltqi => try self.readOnlyRegister3(line_reader, o),
-
-                    .eqf =>  try self.readOnlyRegister3(line_reader, o),
-                    .neqf => try self.readOnlyRegister3(line_reader, o),
-                    .gtf =>  try self.readOnlyRegister3(line_reader, o),
-                    .ltf =>  try self.readOnlyRegister3(line_reader, o),
-                    .gtqf => try self.readOnlyRegister3(line_reader, o),
-                    .ltqf => try self.readOnlyRegister3(line_reader, o),
-
-                    .eqb =>  try self.readOnlyRegister3(line_reader, o),
-                    .neqb => try self.readOnlyRegister3(line_reader, o),
-                }
-            } else {
-                std.debug.print("TODO", .{});
-            }
+            try self.assembleLine(line);
 
             fixedBufferStream.pos = 0;
+        }
+    }
+
+    pub fn assembleLine(self: *Assembler, line: []const u8) !void {
+        if (std.mem.startsWith(u8, line, "#")) {
+            return;
+        }
+
+        const line_lowered = try std.ascii.allocLowerString(self.allocator, line);
+        defer self.allocator.free(line_lowered);
+
+        var opcode: ?Opcode = null;
+        var rest = line;
+
+        for (OPCODE_TABLE) |item| {
+            if (std.mem.startsWith(u8, line_lowered, item.name)) {
+                opcode = item.opcode;
+                rest = rest[item.name.len..];
+                break;
+            }
+        }
+
+        if (opcode) |o| {
+            var fixedBufferStream = std.io.fixedBufferStream(rest);
+            const line_reader = fixedBufferStream.reader().any();
+
+            switch (o) {
+                .nop => try self.addInstruction(o, 0, 0, 0),
+                .halt => try self.addInstruction(o, 0, 0, 0),
+                .igl => {
+                    std.debug.print("Illegal instruction `IGL` must not be used.\n", .{});
+                    return error.Illegal;
+                },
+
+                .dbg => try self.readDbg(line_reader),
+                .load_int => try self.readLoadInt(line_reader),
+                .load_true => try self.readOnlyRegister1(line_reader, o),
+                .load_false => try self.readOnlyRegister1(line_reader, o),
+                .load_const => {
+                    std.debug.print("Instruction `LOAD CONST` is not yet implemented.\n", .{});
+                    return error.Illegal;
+                },
+
+                .mov => try self.readOnlyRegister2(line_reader, o),
+                .convitof => try self.readOnlyRegister2(line_reader, o),
+                .convitob => try self.readOnlyRegister2(line_reader, o),
+                .convftoi => try self.readOnlyRegister2(line_reader, o),
+                .convbtoi => try self.readOnlyRegister2(line_reader, o),
+                .clear => try self.readOnlyRegister1(line_reader, o),
+
+                .addi => try self.readOnlyRegister3(line_reader, o),
+                .subi => try self.readOnlyRegister3(line_reader, o),
+                .muli => try self.readOnlyRegister3(line_reader, o),
+                .divi => try self.readOnlyRegister3(line_reader, o),
+                .modi => try self.readOnlyRegister3(line_reader, o),
+                .negi => try self.readOnlyRegister2(line_reader, o),
+
+                .addf => try self.readOnlyRegister3(line_reader, o),
+                .subf => try self.readOnlyRegister3(line_reader, o),
+                .mulf => try self.readOnlyRegister3(line_reader, o),
+                .divf => try self.readOnlyRegister3(line_reader, o),
+                .modf => try self.readOnlyRegister3(line_reader, o),
+                .negf => try self.readOnlyRegister2(line_reader, o),
+
+                .addb => try self.readOnlyRegister3(line_reader, o),
+                .negb => try self.readOnlyRegister2(line_reader, o),
+
+                .jmp => try self.readJmp(line_reader, o),
+                .jro => try self.readJro(line_reader, o),
+                .jmpdy => try self.readOnlyRegister1(line_reader, o),
+                .jez => try self.readConditionalJump(line_reader, o),
+                .jnz => try self.readConditionalJump(line_reader, o),
+
+                .eqi =>  try self.readOnlyRegister3(line_reader, o),
+                .neqi => try self.readOnlyRegister3(line_reader, o),
+                .gti =>  try self.readOnlyRegister3(line_reader, o),
+                .lti =>  try self.readOnlyRegister3(line_reader, o),
+                .gtqi => try self.readOnlyRegister3(line_reader, o),
+                .ltqi => try self.readOnlyRegister3(line_reader, o),
+
+                .eqf =>  try self.readOnlyRegister3(line_reader, o),
+                .neqf => try self.readOnlyRegister3(line_reader, o),
+                .gtf =>  try self.readOnlyRegister3(line_reader, o),
+                .ltf =>  try self.readOnlyRegister3(line_reader, o),
+                .gtqf => try self.readOnlyRegister3(line_reader, o),
+                .ltqf => try self.readOnlyRegister3(line_reader, o),
+
+                .eqb =>  try self.readOnlyRegister3(line_reader, o),
+                .neqb => try self.readOnlyRegister3(line_reader, o),
+            }
+        } else if (line.len == 0) {
+            // Continue to next line
+        } else {
+            var fixedBufferStream = std.io.fixedBufferStream(line);
+            const line_reader = fixedBufferStream.reader().any();
+
+            const name = try self.readName(line_reader, true, null);
+            const entry = try self.labels.getOrPut(name);
+
+            if (entry.found_existing) {
+                return error.Syntax;
+            } else {
+                entry.value_ptr.* = @intCast(self.instructions.items.len / 4);
+            }
         }
     }
 
@@ -216,13 +244,15 @@ pub const Assembler = struct {
                 error.EndOfStream => return number,
                 else => return err,
             };
-            number <<= 4;
 
             if (byte >= '0' and byte <= '9') {
+                number <<= 4;
                 number += byte - '0';
             } else if (byte >= 'a' and byte <= 'f') {
+                number <<= 4;
                 number += byte - 'a' + 10;
             } else if (byte >= 'A' and byte <= 'F') {
+                number <<= 4;
                 number += byte - 'A' + 10;
             } else if (std.ascii.isWhitespace(byte)) {
                 return number;
@@ -239,11 +269,10 @@ pub const Assembler = struct {
     }
 
     fn readIntegerIteration(number: *u16, first: *bool, sign: *bool, byte: u8) (SyntaxError || error { Done })!void {
-        number.* *= 10;
-
         if (first.* and byte == '-') {
             sign.* = true;
         } else if (byte >= '0' and byte <= '9') {
+            number.* *= 10;
             number.* += byte - '0';
         } else if (std.ascii.isWhitespace(byte)) {
             return error.Done;
@@ -291,12 +320,14 @@ pub const Assembler = struct {
         return number;
     }
 
-    fn readNameIteration(list: *std.ArrayList(u8), first: *bool, byte: u8) (std.mem.Allocator.Error || SyntaxError || error { Done })!void {
+    fn readNameIteration(label: bool, list: *std.ArrayList(u8), first: *bool, byte: u8) (std.mem.Allocator.Error || SyntaxError || error { Done })!void {
         if (byte >= 'a' and byte <= 'z' or byte >= 'A' and byte <= 'Z' or byte == '_') {
             try list.append(byte);
-        } else if (first and byte >= '0' and byte <= '9') {
+        } else if (first.* and byte >= '0' and byte <= '9') {
             try list.append(byte);
-        } else if (std.ascii.isWhitespace(byte)) {
+        } else if (label and !first.* and byte == ':') {
+            return error.Done;
+        } else if (!label and !first.* and std.ascii.isWhitespace(byte)) {
             return error.Done;
         } else {
             return error.Syntax;
@@ -306,21 +337,26 @@ pub const Assembler = struct {
     }
 
     /// Caller owns returned memory.
-    fn readName(self: *Assembler, reader: std.io.AnyReader, first_byte: ?u8) (std.mem.Allocator.Error || anyerror || SyntaxError)![:0]u8 {
+    fn readName(self: *Assembler, reader: std.io.AnyReader, label: bool, first_byte: ?u8) (std.mem.Allocator.Error || anyerror || SyntaxError)![:0]u8 {
         var list = std.ArrayList(u8).init(self.allocator);
         errdefer list.deinit();
 
         var first = true;
 
         if (first_byte) |byte| {
-            readNameIteration(&list, &first, byte) catch |err| switch (err) {
+            readNameIteration(label, &list, &first, byte) catch |err| switch (err) {
                 error.Done => return error.Syntax,
                 else => return err,
             };
         }
 
-        while (reader.readByte()) |byte| {
-            readNameIteration(&list, &first, byte) catch |err| switch (err) {
+        while (true) {
+            const byte = reader.readByte() catch |err| switch (err) {
+                error.EndOfStream => return try list.toOwnedSliceSentinel(0),
+                else => return err,
+            };
+
+            readNameIteration(label, &list, &first, byte) catch |err| switch (err) {
                 error.Done => return try list.toOwnedSliceSentinel(0),
                 else => return err,
             };
@@ -389,5 +425,49 @@ pub const Assembler = struct {
         const register3 = try readRegister(reader, byte);
 
         try self.addInstruction(opcode, register1, register2, register3);
+    }
+
+    fn readJmp(self: *Assembler, reader: std.io.AnyReader, opcode: Opcode) (anyerror || SyntaxError)!void {
+        const byte = try skipWhitespaceAndReadByte(reader);
+        const target = t: {
+            const label = try self.readName(reader, false, byte);
+            defer self.allocator.free(label);
+
+            break :t self.labels.get(label);
+        };
+
+        if (target) |t| {
+            try self.addInstruction(opcode, @bitCast(@as(u8, @intCast(t & 0xFF))), @bitCast(@as(u8, @intCast((t >> 8) & 0xFF))), 0);
+        } else {
+            // TODO Store instruction index to modify this when parsing label, to allow jumping forwards
+            return error.Syntax;
+        }
+    }
+
+    fn readJro(self: *Assembler, reader: std.io.AnyReader, opcode: Opcode) (anyerror || SyntaxError)!void {
+        const byte = try skipWhitespaceAndReadByte(reader);
+        const number = try readInteger(reader, byte);
+
+        try self.addInstruction(opcode, @bitCast(@as(u8, @intCast(number & 0xFF))), @bitCast(@as(u8, @intCast((@as(u16, @bitCast(number)) >> 8) & 0xFF))), 0);
+    }
+
+    fn readConditionalJump(self: *Assembler, reader: std.io.AnyReader, opcode: Opcode) (anyerror || SyntaxError)!void {
+        var byte = try skipWhitespaceAndReadByte(reader);
+        const register = try readRegister(reader, byte);
+
+        byte = try skipWhitespaceAndReadByte(reader);
+        const target = t: {
+            const label = try self.readName(reader, false, byte);
+            defer self.allocator.free(label);
+
+            break :t self.labels.get(label);
+        };
+
+        if (target) |t| {
+            try self.addInstruction(opcode, register, @bitCast(@as(u8, @intCast(t & 0xFF))), @bitCast(@as(u8, @intCast((t >> 8) & 0xFF))));
+        } else {
+            // TODO Store instruction index to modify this when parsing label, to allow jumping forwards
+            return error.Syntax;
+        }
     }
 };
