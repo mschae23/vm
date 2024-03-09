@@ -77,6 +77,7 @@ pub const Assembler = struct {
     instructions: std.ArrayListUnmanaged(u8),
     constants: std.ArrayListUnmanaged(vm.Value),
     labels: std.StringHashMap(u16),
+    future_labels: std.StringHashMap(std.ArrayListUnmanaged(usize)),
 
     /// Input has to be ASCII text.
     pub fn init(allocator: std.mem.Allocator, reader: std.fs.File.Reader) std.mem.Allocator.Error!Assembler {
@@ -86,21 +87,43 @@ pub const Assembler = struct {
             .instructions = try std.ArrayListUnmanaged(u8).initCapacity(allocator, 0),
             .constants = try std.ArrayListUnmanaged(vm.Value).initCapacity(allocator, 0),
             .labels = std.StringHashMap(u16).init(allocator),
+            .future_labels = std.StringHashMap(std.ArrayListUnmanaged(usize)).init(allocator),
         };
     }
 
     pub fn deinit(self: *Assembler) void {
-        var keys = self.labels.keyIterator();
+        {
+            var keys = self.labels.keyIterator();
 
-        while (keys.next()) |key| {
-            self.allocator.free(@as([:0]const u8, @ptrCast(key.*)));
+            while (keys.next()) |key| {
+                self.allocator.free(@as([:0]const u8, @ptrCast(key.*)));
+            }
+
+            self.labels.deinit();
         }
 
-        self.labels.deinit();
+        {
+            var keys = self.future_labels.keyIterator();
+
+            while (keys.next()) |key| {
+                self.allocator.free(@as([:0]const u8, @ptrCast(key.*)));
+            }
+
+            var values = self.future_labels.valueIterator();
+
+            while (values.next()) |value| {
+                value.deinit(self.allocator);
+            }
+
+            self.future_labels.deinit();
+        }
     }
 
     /// Caller owns returned memory.
     pub fn assemble(self: *Assembler) !Assembly {
+        errdefer self.instructions.deinit(self.allocator);
+        errdefer self.constants.deinit(self.allocator);
+
         var buf: [256]u8 = .{undefined} ** 256;
         var fixedBufferStream = std.io.fixedBufferStream(&buf);
         const writer = fixedBufferStream.writer();
@@ -216,10 +239,26 @@ pub const Assembler = struct {
             const name = try self.readName(line_reader, true, null);
             const entry = try self.labels.getOrPut(name);
 
+            const index: u16 = @intCast(self.instructions.items.len / 4);
+
             if (entry.found_existing) {
                 return error.Syntax;
             } else {
-                entry.value_ptr.* = @intCast(self.instructions.items.len / 4);
+                entry.value_ptr.* = index;
+            }
+
+            const future_entry = self.future_labels.fetchRemove(name);
+
+            if (future_entry) |kv| {
+                self.allocator.free(@as([:0]const u8, @ptrCast(kv.key)));
+
+                for (kv.value.items) |i| {
+                    self.instructions.items[i] =     @bitCast(@as(u8, @intCast(index & 0xFF)));
+                    self.instructions.items[i + 1] = @bitCast(@as(u8, @intCast((index >> 8) & 0xFF)));
+                }
+
+                var list = kv.value;
+                list.deinit(self.allocator);
             }
         }
     }
@@ -429,18 +468,27 @@ pub const Assembler = struct {
 
     fn readJmp(self: *Assembler, reader: std.io.AnyReader, opcode: Opcode) (anyerror || SyntaxError)!void {
         const byte = try skipWhitespaceAndReadByte(reader);
-        const target = t: {
-            const label = try self.readName(reader, false, byte);
-            defer self.allocator.free(label);
-
-            break :t self.labels.get(label);
-        };
+        const label = try self.readName(reader, false, byte);
+        const target = self.labels.get(label);
 
         if (target) |t| {
+            self.allocator.free(label);
             try self.addInstruction(opcode, @bitCast(@as(u8, @intCast(t & 0xFF))), @bitCast(@as(u8, @intCast((t >> 8) & 0xFF))), 0);
         } else {
-            // TODO Store instruction index to modify this when parsing label, to allow jumping forwards
-            return error.Syntax;
+            errdefer self.allocator.free(label);
+
+            try self.addInstruction(opcode, 0xFF, 0xFF, 0);
+            const entry = try self.future_labels.getOrPut(label);
+
+            if (!entry.found_existing) {
+                entry.value_ptr.* = try std.ArrayListUnmanaged(usize).initCapacity(self.allocator, 1);
+            }
+
+            try entry.value_ptr.append(self.allocator, self.instructions.items.len - 3);
+
+            if (entry.found_existing) {
+                self.allocator.free(label);
+            }
         }
     }
 
@@ -456,18 +504,27 @@ pub const Assembler = struct {
         const register = try readRegister(reader, byte);
 
         byte = try skipWhitespaceAndReadByte(reader);
-        const target = t: {
-            const label = try self.readName(reader, false, byte);
-            defer self.allocator.free(label);
-
-            break :t self.labels.get(label);
-        };
+        const label = try self.readName(reader, false, byte);
+        const target = self.labels.get(label);
 
         if (target) |t| {
+            self.allocator.free(label);
             try self.addInstruction(opcode, register, @bitCast(@as(u8, @intCast(t & 0xFF))), @bitCast(@as(u8, @intCast((t >> 8) & 0xFF))));
         } else {
-            // TODO Store instruction index to modify this when parsing label, to allow jumping forwards
-            return error.Syntax;
+            errdefer self.allocator.free(label);
+
+            try self.addInstruction(opcode, register, 0xFF, 0xFF);
+            const entry = try self.future_labels.getOrPut(label);
+
+            if (!entry.found_existing) {
+                entry.value_ptr.* = try std.ArrayListUnmanaged(usize).initCapacity(self.allocator, 1);
+            }
+
+            try entry.value_ptr.append(self.allocator, self.instructions.items.len - 2);
+
+            if (entry.found_existing) {
+                self.allocator.free(label);
+            }
         }
     }
 };

@@ -56,11 +56,11 @@ pub const VirtualMachine = struct {
                     self.ip += 3;
                 },
                 .halt => {
-                    print("Halt.\n", .{});
+                    printDebug("Halt.\n", .{});
                     break;
                 },
                 .igl => {
-                    print("Encountered illegal instruction at {}\n", .{self.ip});
+                    printDebug("Encountered illegal instruction at {}\n", .{self.ip});
                     break;
                 },
 
@@ -69,11 +69,10 @@ pub const VirtualMachine = struct {
                     self.ip += 2;
 
                     const value = self.registers[register];
-                    print("Register ${x} as int: {}, float: {d:.16}, bool: {}\n", .{register, @as(i64, @bitCast(value)), @as(f64, @bitCast(value)), 0 != value});
+                    printDebugImportant("Register ${x} as int: {}, float: {d:.16}, bool: {}\n", .{register, @as(i64, @bitCast(value)), @as(f64, @bitCast(value)), 0 != value});
                 },
                 .load_int => {
                     const register = self.nextByte();
-                    print("Load int at register {}\n", .{register});
                     self.registers[register] = @as(u64, self.next2BytesLittle());
                 },
                 .load_true => {
@@ -99,118 +98,118 @@ pub const VirtualMachine = struct {
                     self.registers[to] = self.registers[from];
                 },
                 .convitof => {
-                    const from = self.nextByte();
+                    const from = @as(i64, @bitCast(self.registers[self.nextByte()]));
                     const to = self.nextByte();
                     self.ip += 1;
-                    self.registers[to] = @bitCast(@as(f64, @floatFromInt(@as(i64, @bitCast(self.registers[from])))));
+                    self.registers[to] = @bitCast(@as(f64, @floatFromInt(from)));
                 },
                 .convitob => {
-                    const from = self.nextByte();
+                    const from = @as(i64, @bitCast(self.registers[self.nextByte()]));
                     const to = self.nextByte();
                     self.ip += 1;
-                    self.registers[to] = @intFromBool(0 != @as(i64, @bitCast(self.registers[from])));
+                    self.registers[to] = @intFromBool(0 != from);
                 },
                 .convftoi => {
-                    const from = self.nextByte();
+                    const from = @as(f64, @bitCast(self.registers[self.nextByte()]));
                     const to = self.nextByte();
                     self.ip += 1;
-                    self.registers[to] = @bitCast(@as(i64, @intFromFloat(@as(f64, @bitCast(self.registers[from])))));
+                    self.registers[to] = @bitCast(@as(i64, @intFromFloat(from)));
                 },
                 .convbtoi => {
-                    const from = self.nextByte();
+                    const from = 0 != self.registers[self.nextByte()];
                     const to = self.nextByte();
                     self.ip += 1;
-                    self.registers[to] = @as(u64, @intFromBool(0 != self.registers[from]));
+                    self.registers[to] = @as(u64, @intFromBool(from));
                 },
                 .clear => {
                     self.ip += 3;
                 },
 
                 .addi => {
-                    const a = self.nextByte();
-                    const b = self.nextByte();
+                    const a = @as(i64, @bitCast(self.registers[self.nextByte()]));
+                    const b = @as(i64, @bitCast(self.registers[self.nextByte()]));
                     const target = self.nextByte();
-                    self.registers[target] = @bitCast(@as(i64, @bitCast(self.registers[a])) + @as(i64, @bitCast(self.registers[b])));
+                    self.registers[target] = @bitCast(a + b);
                 },
                 .subi => {
-                    const a = self.nextByte();
-                    const b = self.nextByte();
+                    const a = @as(i64, @bitCast(self.registers[self.nextByte()]));
+                    const b = @as(i64, @bitCast(self.registers[self.nextByte()]));
                     const target = self.nextByte();
-                    self.registers[target] = @bitCast(@as(i64, @bitCast(self.registers[a])) - @as(i64, @bitCast(self.registers[b])));
+                    self.registers[target] = @bitCast(a - b);
                 },
                 .muli => {
-                    const a = self.nextByte();
-                    const b = self.nextByte();
+                    const a = @as(i64, @bitCast(self.registers[self.nextByte()]));
+                    const b = @as(i64, @bitCast(self.registers[self.nextByte()]));
                     const target = self.nextByte();
-                    self.registers[target] = @bitCast(@as(i64, @bitCast(self.registers[a])) * @as(i64, @bitCast(self.registers[b])));
+                    self.registers[target] = @bitCast(a * b);
                 },
                 .divi => {
-                    const a = self.nextByte();
-                    const b = self.nextByte();
+                    const a = @as(i64, @bitCast(self.registers[self.nextByte()]));
+                    const b = @as(i64, @bitCast(self.registers[self.nextByte()]));
                     const target = self.nextByte();
-                    self.registers[target] = @bitCast(@divTrunc(@as(i64, @bitCast(self.registers[a])), @as(i64, @bitCast(self.registers[b]))));
+                    self.registers[target] = @bitCast(@divTrunc(a, b));
                 },
                 .modi => {
-                    const a = self.nextByte();
-                    const b = self.nextByte();
+                    const a = @as(i64, @bitCast(self.registers[self.nextByte()]));
+                    const b = @as(i64, @bitCast(self.registers[self.nextByte()]));
                     const target = self.nextByte();
-                    self.registers[target] = @bitCast(@rem(@as(i64, @bitCast(self.registers[a])), @as(i64, @bitCast(self.registers[b]))));
+                    self.registers[target] = @bitCast(@rem(a, b));
                 },
                 .negi => {
-                    const from = self.nextByte();
+                    const from = @as(i64, @bitCast(self.registers[self.nextByte()]));
                     const to = self.nextByte();
                     self.ip += 1;
-                    self.registers[to] = @bitCast(-@as(i64, @bitCast(self.registers[from])));
+                    self.registers[to] = @bitCast(-from);
                 },
 
                 .addf => {
-                    const a = self.nextByte();
-                    const b = self.nextByte();
+                    const a = @as(f64, @bitCast(self.registers[self.nextByte()]));
+                    const b = @as(f64, @bitCast(self.registers[self.nextByte()]));
                     const target = self.nextByte();
-                    self.registers[target] = @bitCast(@as(f64, @bitCast(self.registers[a])) + @as(f64, @bitCast(self.registers[b])));
+                    self.registers[target] = @bitCast(a + b);
                 },
                 .subf => {
-                    const a = self.nextByte();
-                    const b = self.nextByte();
+                    const a = @as(f64, @bitCast(self.registers[self.nextByte()]));
+                    const b = @as(f64, @bitCast(self.registers[self.nextByte()]));
                     const target = self.nextByte();
-                    self.registers[target] = @bitCast(@as(f64, @bitCast(self.registers[a])) - @as(f64, @bitCast(self.registers[b])));
+                    self.registers[target] = @bitCast(a - b);
                 },
                 .mulf => {
-                    const a = self.nextByte();
-                    const b = self.nextByte();
+                    const a = @as(f64, @bitCast(self.registers[self.nextByte()]));
+                    const b = @as(f64, @bitCast(self.registers[self.nextByte()]));
                     const target = self.nextByte();
-                    self.registers[target] = @bitCast(@as(f64, @bitCast(self.registers[a])) * @as(f64, @bitCast(self.registers[b])));
+                    self.registers[target] = @bitCast(a * b);
                 },
                 .divf => {
-                    const a = self.nextByte();
-                    const b = self.nextByte();
+                    const a = @as(f64, @bitCast(self.registers[self.nextByte()]));
+                    const b = @as(f64, @bitCast(self.registers[self.nextByte()]));
                     const target = self.nextByte();
-                    self.registers[target] = @bitCast(@as(f64, @bitCast(self.registers[a])) / @as(f64, @bitCast(self.registers[b])));
+                    self.registers[target] = @bitCast(a / b);
                 },
                 .modf => {
-                    const a = self.nextByte();
-                    const b = self.nextByte();
+                    const a = @as(f64, @bitCast(self.registers[self.nextByte()]));
+                    const b = @as(f64, @bitCast(self.registers[self.nextByte()]));
                     const target = self.nextByte();
-                    self.registers[target] = @bitCast(@rem(@as(f64, @bitCast(self.registers[a])), @as(f64, @bitCast(self.registers[b]))));
+                    self.registers[target] = @bitCast(@rem(a, b));
                 },
                 .negf => {
-                    const from = self.nextByte();
+                    const from = @as(f64, @bitCast(self.registers[self.nextByte()]));
                     const to = self.nextByte();
                     self.ip += 1;
-                    self.registers[to] = @bitCast(-@as(f64, @bitCast(self.registers[from])));
+                    self.registers[to] = @bitCast(-from);
                 },
 
                 .addb => {
-                    const a = self.nextByte();
-                    const b = self.nextByte();
+                    const a = @as(i64, @bitCast(self.registers[self.nextByte()]));
+                    const b = 0 != self.registers[self.nextByte()];
                     const target = self.nextByte();
-                    self.registers[target] = @bitCast(@as(i64, @bitCast(self.registers[a])) + @intFromBool(0 != self.registers[b]));
+                    self.registers[target] = @bitCast(a + @intFromBool(b));
                 },
                 .negb => {
-                    const from = self.nextByte();
+                    const from = 0 != self.registers[self.nextByte()];
                     const to = self.nextByte();
                     self.ip += 1;
-                    self.registers[to] = @intFromBool(!(0 != self.registers[from]));
+                    self.registers[to] = @intFromBool(!from);
                 },
 
                 .jmp => {
@@ -243,90 +242,90 @@ pub const VirtualMachine = struct {
                 },
 
                 .eqi => {
-                    const a = self.nextByte();
-                    const b = self.nextByte();
+                    const a = @as(i64, @bitCast(self.registers[self.nextByte()]));
+                    const b = @as(i64, @bitCast(self.registers[self.nextByte()]));
                     const target = self.nextByte();
-                    self.registers[target] = @as(u64, @intFromBool(@as(i64, @bitCast(self.registers[a])) == @as(i64, @bitCast(self.registers[b]))));
+                    self.registers[target] = @as(u64, @intFromBool(a == b));
                 },
                 .neqi => {
-                    const a = self.nextByte();
-                    const b = self.nextByte();
+                    const a = @as(i64, @bitCast(self.registers[self.nextByte()]));
+                    const b = @as(i64, @bitCast(self.registers[self.nextByte()]));
                     const target = self.nextByte();
-                    self.registers[target] = @as(u64, @intFromBool(@as(i64, @bitCast(self.registers[a])) != @as(i64, @bitCast(self.registers[b]))));
+                    self.registers[target] = @as(u64, @intFromBool(a != b));
                 },
                 .gti => {
-                    const a = self.nextByte();
-                    const b = self.nextByte();
+                    const a = @as(i64, @bitCast(self.registers[self.nextByte()]));
+                    const b = @as(i64, @bitCast(self.registers[self.nextByte()]));
                     const target = self.nextByte();
-                    self.registers[target] = @as(u64, @intFromBool(@as(i64, @bitCast(self.registers[a])) > @as(i64, @bitCast(self.registers[b]))));
+                    self.registers[target] = @as(u64, @intFromBool(a > b));
                 },
                 .lti => {
-                    const a = self.nextByte();
-                    const b = self.nextByte();
+                    const a = @as(i64, @bitCast(self.registers[self.nextByte()]));
+                    const b = @as(i64, @bitCast(self.registers[self.nextByte()]));
                     const target = self.nextByte();
-                    self.registers[target] = @as(u64, @intFromBool(@as(i64, @bitCast(self.registers[a])) < @as(i64, @bitCast(self.registers[b]))));
+                    self.registers[target] = @as(u64, @intFromBool(a < b));
                 },
                 .gtqi => {
-                    const a = self.nextByte();
-                    const b = self.nextByte();
+                    const a = @as(i64, @bitCast(self.registers[self.nextByte()]));
+                    const b = @as(i64, @bitCast(self.registers[self.nextByte()]));
                     const target = self.nextByte();
-                    self.registers[target] = @as(u64, @intFromBool(@as(i64, @bitCast(self.registers[a])) >= @as(i64, @bitCast(self.registers[b]))));
+                    self.registers[target] = @as(u64, @intFromBool(a >= b));
                 },
                 .ltqi => {
-                    const a = self.nextByte();
-                    const b = self.nextByte();
+                    const a = @as(i64, @bitCast(self.registers[self.nextByte()]));
+                    const b = @as(i64, @bitCast(self.registers[self.nextByte()]));
                     const target = self.nextByte();
-                    self.registers[target] = @as(u64, @intFromBool(@as(i64, @bitCast(self.registers[a])) <= @as(i64, @bitCast(self.registers[b]))));
+                    self.registers[target] = @as(u64, @intFromBool(a <= b));
                 },
 
                 .eqf => {
-                    const a = self.nextByte();
-                    const b = self.nextByte();
+                    const a = @as(f64, @bitCast(self.registers[self.nextByte()]));
+                    const b = @as(f64, @bitCast(self.registers[self.nextByte()]));
                     const target = self.nextByte();
-                    self.registers[target] = @as(u64, @intFromBool(@as(f64, @bitCast(self.registers[a])) == @as(f64, @bitCast(self.registers[b]))));
+                    self.registers[target] = @as(u64, @intFromBool(a == b));
                 },
                 .neqf => {
-                    const a = self.nextByte();
-                    const b = self.nextByte();
+                    const a = @as(f64, @bitCast(self.registers[self.nextByte()]));
+                    const b = @as(f64, @bitCast(self.registers[self.nextByte()]));
                     const target = self.nextByte();
-                    self.registers[target] = @as(u64, @intFromBool(@as(f64, @bitCast(self.registers[a])) != @as(f64, @bitCast(self.registers[b]))));
+                    self.registers[target] = @as(u64, @intFromBool(a != b));
                 },
                 .gtf => {
-                    const a = self.nextByte();
-                    const b = self.nextByte();
+                    const a = @as(f64, @bitCast(self.registers[self.nextByte()]));
+                    const b = @as(f64, @bitCast(self.registers[self.nextByte()]));
                     const target = self.nextByte();
-                    self.registers[target] = @as(u64, @intFromBool(@as(f64, @bitCast(self.registers[a])) > @as(f64, @bitCast(self.registers[b]))));
+                    self.registers[target] = @as(u64, @intFromBool(a > b));
                 },
                 .ltf => {
-                    const a = self.nextByte();
-                    const b = self.nextByte();
+                    const a = @as(f64, @bitCast(self.registers[self.nextByte()]));
+                    const b = @as(f64, @bitCast(self.registers[self.nextByte()]));
                     const target = self.nextByte();
-                    self.registers[target] = @as(u64, @intFromBool(@as(f64, @bitCast(self.registers[a])) < @as(f64, @bitCast(self.registers[b]))));
+                    self.registers[target] = @as(u64, @intFromBool(a < b));
                 },
                 .gtqf => {
-                    const a = self.nextByte();
-                    const b = self.nextByte();
+                    const a = @as(f64, @bitCast(self.registers[self.nextByte()]));
+                    const b = @as(f64, @bitCast(self.registers[self.nextByte()]));
                     const target = self.nextByte();
-                    self.registers[target] = @as(u64, @intFromBool(@as(f64, @bitCast(self.registers[a])) >= @as(f64, @bitCast(self.registers[b]))));
+                    self.registers[target] = @as(u64, @intFromBool(a >= b));
                 },
                 .ltqf => {
-                    const a = self.nextByte();
-                    const b = self.nextByte();
+                    const a = @as(f64, @bitCast(self.registers[self.nextByte()]));
+                    const b = @as(f64, @bitCast(self.registers[self.nextByte()]));
                     const target = self.nextByte();
-                    self.registers[target] = @as(u64, @intFromBool(@as(f64, @bitCast(self.registers[a])) <= @as(f64, @bitCast(self.registers[b]))));
+                    self.registers[target] = @as(u64, @intFromBool(a <= b));
                 },
 
                 .eqb => {
-                    const a = self.nextByte();
-                    const b = self.nextByte();
+                    const a = 0 != self.registers[self.nextByte()];
+                    const b = 0 != self.registers[self.nextByte()];
                     const target = self.nextByte();
-                    self.registers[target] = @intFromBool((0 != self.registers[a]) == (0 != self.registers[b]));
+                    self.registers[target] = @intFromBool(a == b);
                 },
                 .neqb => {
-                    const a = self.nextByte();
-                    const b = self.nextByte();
+                    const a = 0 != self.registers[self.nextByte()];
+                    const b = 0 != self.registers[self.nextByte()];
                     const target = self.nextByte();
-                    self.registers[target] = @intFromBool((0 != self.registers[a]) != (0 != self.registers[b]));
+                    self.registers[target] = @intFromBool(a != b);
                 },
             }
         }
@@ -335,7 +334,7 @@ pub const VirtualMachine = struct {
     fn decodeOpcode(self: *VirtualMachine) Opcode {
         const opcode: Opcode = @enumFromInt(self.instructions[self.ip]);
 
-        print("ip: {}; inst: {}; op: {s} ({})\n", .{self.ip, self.ip / 4, @tagName(opcode), @intFromEnum(opcode)});
+        printDebug("ip: {} (inst: {}): {s} ({})\n", .{self.ip, self.ip / 4, @tagName(opcode), @intFromEnum(opcode)});
 
         self.ip += 1;
         return opcode;
@@ -359,7 +358,11 @@ pub const VirtualMachine = struct {
         return result;
     }
 
-    fn print(comptime fmt: []const u8, args: anytype) void {
+    fn printDebug(comptime fmt: []const u8, args: anytype) void {
+        return std.debug.print("[debug | vm] " ++ fmt, args);
+    }
+
+    fn printDebugImportant(comptime fmt: []const u8, args: anytype) void {
         return std.debug.print("[debug | vm] " ++ fmt, args);
     }
 };
