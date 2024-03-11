@@ -7,7 +7,7 @@ load int $1 4
 
 ## PROGRAMM ##
 
-# $2 ist die Anzahl der gefunden Ziffern
+# $2 ist die Anzahl der gefundenen Ziffern
 load int $2 0
 # $3 ist die Anzahl von Ziffern insgesamt
 load int $3 0
