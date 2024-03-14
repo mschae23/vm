@@ -46,9 +46,9 @@ pub const OPCODE_TABLE: []const OpcodeItem = &.{
     OpcodeItem { .name = "addb", .opcode = Opcode.addb, },
     OpcodeItem { .name = "negb", .opcode = Opcode.negb, },
 
+    OpcodeItem { .name = "jmpdy", .opcode = Opcode.jmpdy, }, // Has to be before .jmp, otherwise that one overrides .jmpdy
     OpcodeItem { .name = "jmp", .opcode = Opcode.jmp, },
     OpcodeItem { .name = "jro", .opcode = Opcode.jro, },
-    OpcodeItem { .name = "jmpdy", .opcode = Opcode.jmpdy, },
     OpcodeItem { .name = "jez", .opcode = Opcode.jez, },
     OpcodeItem { .name = "jnz", .opcode = Opcode.jnz, },
 
@@ -175,7 +175,7 @@ pub const Assembler = struct {
                 },
 
                 .dbg => try self.readDbg(line_reader),
-                .load_int => try self.readLoadInt(line_reader),
+                .load_int => try self.readLoadInt(line_reader, Opcode.load_int),
                 .load_true => try self.readOnlyRegister1(line_reader, o),
                 .load_false => try self.readOnlyRegister1(line_reader, o),
                 .load_const => {
@@ -208,7 +208,7 @@ pub const Assembler = struct {
                 .negb => try self.readOnlyRegister2(line_reader, o),
 
                 .jmp => try self.readJmp(line_reader, o),
-                .jro => try self.readJro(line_reader, o),
+                .jro => try self.readOnlyRegister1(line_reader, o),
                 .jmpdy => try self.readOnlyRegister1(line_reader, o),
                 .jez => try self.readConditionalJump(line_reader, o),
                 .jnz => try self.readConditionalJump(line_reader, o),
@@ -242,6 +242,7 @@ pub const Assembler = struct {
             const index: u16 = @intCast(self.instructions.items.len / 4);
 
             if (entry.found_existing) {
+                printError("Label already used: {s}\n", .{name});
                 return error.Syntax;
             } else {
                 entry.value_ptr.* = index;
@@ -272,7 +273,7 @@ pub const Assembler = struct {
 
     fn readRegister(reader: std.io.AnyReader, first_byte: ?u8) (anyerror || SyntaxError)!u8 {
         if ((first_byte == null and try reader.readByte() != '$') or (first_byte != null and first_byte.? != '$')) {
-            std.debug.print("First byte (readRegister): {?c}\n", .{first_byte});
+            printError("Registers must begin with '$': {?c}\n", .{first_byte});
             return error.Syntax;
         }
 
@@ -296,6 +297,7 @@ pub const Assembler = struct {
             } else if (std.ascii.isWhitespace(byte)) {
                 return number;
             } else {
+                printError("Invalid character in hexadecimal register number: {c}\n", .{number});
                 return error.Syntax;
             }
         }
@@ -316,6 +318,7 @@ pub const Assembler = struct {
         } else if (std.ascii.isWhitespace(byte)) {
             return error.Done;
         } else {
+            printError("Invalid character in decimal integer number: {c}\n", .{byte});
             return error.Syntax;
         }
 
@@ -339,7 +342,10 @@ pub const Assembler = struct {
 
         if (first_byte) |byte| {
             readIntegerIteration(&number, &first, &sign, byte) catch |err| switch (err) {
-                error.Done => return error.Syntax,
+                error.Done => {
+                    printError("Integer number is empty\n", .{});
+                    return error.Syntax;
+                },
                 else => return err,
             };
         }
@@ -369,6 +375,7 @@ pub const Assembler = struct {
         } else if (!label and !first.* and std.ascii.isWhitespace(byte)) {
             return error.Done;
         } else {
+            printError("Invalid character in label name: {c}\n", .{byte});
             return error.Syntax;
         }
 
@@ -384,7 +391,10 @@ pub const Assembler = struct {
 
         if (first_byte) |byte| {
             readNameIteration(label, &list, &first, byte) catch |err| switch (err) {
-                error.Done => return error.Syntax,
+                error.Done => {
+                    printError("Empty label name\n", .{});
+                    return error.Syntax;
+                },
                 else => return err,
             };
         }
@@ -426,14 +436,39 @@ pub const Assembler = struct {
         try self.addInstruction(Opcode.dbg, register, 0, 0);
     }
 
-    fn readLoadInt(self: *Assembler, reader: std.io.AnyReader) (anyerror || SyntaxError)!void {
+    fn readLoadInt(self: *Assembler, reader: std.io.AnyReader, opcode: Opcode) (anyerror || SyntaxError)!void {
         var byte = try skipWhitespaceAndReadByte(reader);
         const register = try readRegister(reader, byte);
 
         byte = try skipWhitespaceAndReadByte(reader);
-        const number = try readInteger(reader, byte);
 
-        try self.addInstruction(Opcode.load_int, register, @bitCast(@as(u8, @intCast(number & 0xFF))), @bitCast(@as(u8, @intCast((@as(u16, @bitCast(number)) >> 8) & 0xFF))));
+        if (byte == ':') {
+            const label = try self.readName(reader, false, null);
+            const target = self.labels.get(label);
+
+            if (target) |t| {
+                self.allocator.free(label);
+                try self.addInstruction(opcode, @bitCast(@as(u8, @intCast(t & 0xFF))), @bitCast(@as(u8, @intCast((t >> 8) & 0xFF))), 0);
+            } else {
+                errdefer self.allocator.free(label);
+
+                try self.addInstruction(opcode, register, 0xFF, 0xFF);
+                const entry = try self.future_labels.getOrPut(label);
+
+                if (!entry.found_existing) {
+                    entry.value_ptr.* = try std.ArrayListUnmanaged(usize).initCapacity(self.allocator, 1);
+                }
+
+                try entry.value_ptr.append(self.allocator, self.instructions.items.len - 2);
+
+                if (entry.found_existing) {
+                    self.allocator.free(label);
+                }
+            }
+        } else {
+            const number = try readInteger(reader, byte);
+            return self.addInstruction(opcode, register, @bitCast(@as(u8, @intCast(number & 0xFF))), @bitCast(@as(u8, @intCast((@as(u16, @bitCast(number)) >> 8) & 0xFF))));
+        }
     }
 
     fn readOnlyRegister1(self: *Assembler, reader: std.io.AnyReader, opcode: Opcode) (anyerror || SyntaxError)!void {
@@ -494,9 +529,9 @@ pub const Assembler = struct {
 
     fn readJro(self: *Assembler, reader: std.io.AnyReader, opcode: Opcode) (anyerror || SyntaxError)!void {
         const byte = try skipWhitespaceAndReadByte(reader);
-        const number = try readInteger(reader, byte);
+        const register = try readRegister(reader, byte);
 
-        try self.addInstruction(opcode, @bitCast(@as(u8, @intCast(number & 0xFF))), @bitCast(@as(u8, @intCast((@as(u16, @bitCast(number)) >> 8) & 0xFF))), 0);
+        try self.addInstruction(opcode, register, 0, 0);
     }
 
     fn readConditionalJump(self: *Assembler, reader: std.io.AnyReader, opcode: Opcode) (anyerror || SyntaxError)!void {
@@ -526,5 +561,9 @@ pub const Assembler = struct {
                 self.allocator.free(label);
             }
         }
+    }
+
+    fn printError(comptime fmt: []const u8, args: anytype) void {
+        return std.debug.print("[error | assembler] " ++ fmt, args);
     }
 };

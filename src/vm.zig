@@ -217,12 +217,12 @@ pub const VirtualMachine = struct {
                     self.ip = target * 4;
                 },
                 .jro => {
-                    const offset = self.next2BytesSignedLittle();
+                    const offset: isize = @intCast(@as(i64, @bitCast(self.registers[self.nextByte()])));
                     self.ip = @as(usize, @intCast(@as(isize, @intCast(self.ip - 3)) + (offset * 4)));
                 },
                 .jmpdy => {
-                    const offset: isize = @intCast(@as(i64, @bitCast(self.registers[self.nextByte()])));
-                    self.ip = @as(usize, @intCast(@as(isize, @intCast(self.ip - 3)) + (offset * 4)));
+                    const target: usize = @intCast(@as(i64, @bitCast(self.registers[self.nextByte()])));
+                    self.ip = target * 4;
                 },
                 .jez => {
                     const register = self.nextByte();
@@ -334,7 +334,9 @@ pub const VirtualMachine = struct {
     fn decodeOpcode(self: *VirtualMachine) Opcode {
         const opcode: Opcode = @enumFromInt(self.instructions[self.ip]);
 
-        printDebug("ip: {} (inst: {}): {s} ({})\n", .{self.ip, self.ip / 4, @tagName(opcode), @intFromEnum(opcode)});
+        printDebug("ip: {: >4} (inst: {: >4}) 0x{x:0>2} 0x{x:0>2} 0x{x:0>2}: {s} ({})\n", .{self.ip, self.ip / 4,
+            self.instructions[self.ip + 1], self.instructions[self.ip + 2], self.instructions[self.ip + 3],
+            @tagName(opcode), @intFromEnum(opcode)});
 
         self.ip += 1;
         return opcode;
